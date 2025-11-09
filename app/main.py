@@ -6,3 +6,4 @@ app = FastAPI(title="Gmail Analyzer API", version="0.1.0")
 def health():
     return {"status": "ok"}
 
+
