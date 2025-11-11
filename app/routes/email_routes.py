@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from app.services.gmail_service import get_gmail_service
 from app.services.extraction_service import get_extraction_service
+from app.services.label_service import get_label_service
 
 
 router = APIRouter(prefix="/emails", tags=["emails"])
@@ -61,7 +62,7 @@ async def oauth2_callback(request: Request):
                 
                 flow = Flow.from_client_secrets_file(
                     settings.GMAIL_CREDENTIALS_FILE,
-                    scopes=settings.GMAIL_SCOPES,
+                    scopes=settings.GMAIL_SCOPES_LIST,
                     redirect_uri=settings.GMAIL_REDIRECT_URI
                 )
             except Exception as e:
@@ -111,7 +112,7 @@ def ping():
 
 
 @router.get("/analyze")
-def analyze_emails():
+def analyze_emails(debug: bool = False):
     """Analizar el correo más reciente y extraer información de PDFs adjuntos."""
     try:
         gmail_service = get_gmail_service()
@@ -141,12 +142,22 @@ def analyze_emails():
         # Analizar el correo más reciente
         latest_message_id = messages[0]['id']
         extraction_service = get_extraction_service()
-        result = extraction_service.analyze_email_with_pdfs(latest_message_id)
         
-        return {
-            "status": "success",
-            "result": result
-        }
+        # Extraer datos estructurados en formato PO/QUOTE
+        result = extraction_service.extract_structured_data(latest_message_id, debug=debug)
+        
+        # Aplicar etiqueta según la clasificación
+        tipo_documento = result.get('tipo_documento', '').upper()
+        if tipo_documento in ['PO', 'QUOTE']:
+            try:
+                label_service = get_label_service()
+                label_service.apply_label_to_message(latest_message_id, tipo_documento)
+                result['etiqueta_aplicada'] = tipo_documento
+            except Exception as e:
+                result['etiqueta_aplicada'] = None
+                result['error_etiqueta'] = str(e)
+        
+        return result
             
     except HTTPException:
         raise
