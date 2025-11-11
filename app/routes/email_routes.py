@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from app.services.gmail_service import get_gmail_service
+from app.services.extraction_service import get_extraction_service
 
 
 router = APIRouter(prefix="/emails", tags=["emails"])
@@ -107,4 +108,50 @@ def ping():
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al probar conexión: {str(e)}")
+
+
+@router.get("/analyze")
+def analyze_emails():
+    """Analizar el correo más reciente y extraer información de PDFs adjuntos."""
+    try:
+        gmail_service = get_gmail_service()
+        
+        if not gmail_service.is_authenticated():
+            raise HTTPException(
+                status_code=401,
+                detail="No autenticado. Por favor inicia sesión primero en /emails/auth/login"
+            )
+        
+        # Obtener el último correo recibido
+        if not gmail_service.service:
+            gmail_service.build_service()
+        
+        results = gmail_service.service.users().messages().list(
+            userId='me',
+            maxResults=1
+        ).execute()
+        
+        messages = results.get('messages', [])
+        if not messages:
+            raise HTTPException(
+                status_code=404,
+                detail="No se encontraron correos"
+            )
+        
+        # Analizar el correo más reciente
+        latest_message_id = messages[0]['id']
+        extraction_service = get_extraction_service()
+        result = extraction_service.analyze_email_with_pdfs(latest_message_id)
+        
+        return {
+            "status": "success",
+            "result": result
+        }
+            
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al analizar correo: {str(e)}")
 
