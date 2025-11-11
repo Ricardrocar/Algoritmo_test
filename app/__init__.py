@@ -1,3 +1,2 @@
-# (opcional) Marca de paquete
 
 

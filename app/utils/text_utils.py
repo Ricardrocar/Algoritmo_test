@@ -4,7 +4,6 @@ def clean_text(text: str) -> str:
         return ""
     return text.strip()
 
-
 def truncate_text(text: str, max_length: int = 100) -> str:
     """Truncate text to a maximum length."""
     if not text:
