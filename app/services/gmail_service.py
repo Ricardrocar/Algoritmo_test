@@ -148,6 +148,60 @@ class GmailService:
             print(f"Error al obtener mensajes: {error}")
             return []
     
+    def setup_watch(self, topic_name: str, label_ids: list = None) -> dict:
+        """Configurar watch de Gmail para recibir notificaciones de nuevos correos."""
+        try:
+            if not self.service:
+                self.build_service()
+            
+            if label_ids is None:
+                label_ids = ['INBOX']
+            
+            watch_request = {
+                'labelIds': label_ids,
+                'topicName': topic_name
+            }
+            
+            result = self.service.users().watch(
+                userId='me',
+                body=watch_request
+            ).execute()
+            
+            return {
+                "status": "success",
+                "history_id": result.get('historyId'),
+                "expiration": result.get('expiration')
+            }
+        except HttpError as error:
+            return {
+                "status": "error",
+                "message": f"Error al configurar watch: {error}"
+            }
+        except Exception as error:
+            return {
+                "status": "error",
+                "message": f"Error inesperado: {error}"
+            }
+    
+    def stop_watch(self) -> dict:
+        """Detener watch de Gmail."""
+        try:
+            if not self.service:
+                self.build_service()
+            
+            self.service.users().stop(userId='me').execute()
+            return {"status": "success", "message": "Watch detenido correctamente"}
+        except HttpError as error:
+            return {
+                "status": "error",
+                "message": f"Error al detener watch: {error}"
+            }
+        except Exception as error:
+            return {
+                "status": "error",
+                "message": f"Error inesperado: {error}"
+            }
+    
 _gmail_service_instance: Optional[GmailService] = None
 
 def get_gmail_service() -> GmailService:

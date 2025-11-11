@@ -117,7 +117,6 @@ class ExtractionService:
         email_info = self.extract_email_info(message_id)
         subject, body = email_info.get('subject', ''), email_info.get('body', '')
         
-        # Extraer textos de PDFs
         all_pdf_texts = []
         for att in email_info.get('attachments', []):
             if att.get('is_pdf'):
@@ -130,7 +129,6 @@ class ExtractionService:
         pdf_combined = ' '.join(all_pdf_texts)
         combined_text = f"{subject} {body} {pdf_combined}"
         
-        # Clasificar y extraer datos
         tipo_documento = self.classification_service.classify_document(subject, body, pdf_combined)
         productos = []
         for pdf_text in all_pdf_texts:

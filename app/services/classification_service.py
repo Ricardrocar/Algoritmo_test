@@ -3,45 +3,98 @@ from typing import Dict, Any, Optional
 
 
 class ClassificationService:
-    """Servicio para clasificar documentos como PO o QUOTE."""
     
     def classify_document(self, subject: str, body: str, pdf_text: str = "") -> str:
-        """ Clasificacion de PO o QUOTE """
-        combined_text = f"{subject} {body} {pdf_text}".upper()
-        has_po, has_quote = False, False
+        subject_upper = subject.upper()
+        body_upper = body.upper()
+        pdf_upper = pdf_text.upper()
+        combined_text = f"{subject} {body} {pdf_text}"
         
-        # REGLA 1: PO en asunto
-        po_subject = r'\b(PO|Purchase Order|Orden de Compra|Orden\s*#|PO[-_\s]?\d+)\b'
-        if re.search(po_subject, subject, re.IGNORECASE):
-            return "PO"
+        has_po = False
+        has_quote = False
         
-        # REGLA 2: QUOTE en asunto o cuerpo
-        quote_pattern = r'\b(QUOTE|Quotation|Cotización|Quote Request)\b'
-        if re.search(quote_pattern, subject + body, re.IGNORECASE):
-            has_quote = True
+        po_patterns_subject = [
+            r'\bPO\b',
+            r'\bPURCHASE\s+ORDER\b',
+            r'\bORDEN\s+DE\s+COMPRA\b',
+            r'\bORDEN\s*#',
+            r'\bPO[-_\s]?\d+'
+        ]
         
-        # REGLA 3: PO en PDF
-        if pdf_text and re.search(r'\b(Purchase Order|PO Number)\b', pdf_text, re.IGNORECASE):
-            if not has_quote:
+        for pattern in po_patterns_subject:
+            if re.search(pattern, subject_upper):
                 return "PO"
-            has_po = True
         
-        # REGLA 4: QUOTE si solicita precios sin número de PO
-        quote_request = r'(send me a quote|cotizaci[oó]n|please quote|quote for|price quote|request.*quote)'
-        po_number = r'\b(PO|Orden|Order)\s*[-:#]?\s*\d+'
-        if re.search(quote_request, combined_text, re.IGNORECASE):
-            if not re.search(po_number, combined_text, re.IGNORECASE):
-                return "QUOTE"
-            has_quote = True
+        quote_patterns = [
+            r'\bQUOTE\b',
+            r'\bQUOTATION\b',
+            r'\bCOTIZACI[OÓ]N\b',
+            r'\bQUOTE\s+REQUEST\b'
+        ]
         
-        # REGLA 5: Desempate
+        for pattern in quote_patterns:
+            if re.search(pattern, subject_upper) or re.search(pattern, body_upper):
+                has_quote = True
+                break
+        
+        if pdf_text:
+            pdf_po_patterns = [
+                r'\bPURCHASE\s+ORDER\b',
+                r'\bPO\s+NUMBER\b',
+                r'\bPO\s*#'
+            ]
+            
+            for pattern in pdf_po_patterns:
+                if re.search(pattern, pdf_upper):
+                    if not has_quote:
+                        return "PO"
+                    has_po = True
+                    break
+        
+        quote_request_patterns = [
+            r'\bSEND\s+ME\s+A\s+QUOTE\b',
+            r'\bCOTIZACI[OÓ]N\b',
+            r'\bPLEASE\s+QUOTE\b',
+            r'\bQUOTE\s+FOR\b',
+            r'\bPRICE\s+QUOTE\b',
+            r'\bREQUEST.*QUOTE\b',
+            r'\bSOLICIT(O|A|AR).*COTIZACI[OÓ]N\b',
+            r'\bCONFIRM(AR|A|O).*PRECIO(S)?\b'
+        ]
+        
+        po_number_patterns = [
+            r'\bPO\s*[-:#]?\s*\d+',
+            r'\bORDEN\s*[-:#]?\s*\d+',
+            r'\bORDER\s*[-:#]?\s*\d+'
+        ]
+        
+        has_po_number = False
+        for pattern in po_number_patterns:
+            if re.search(pattern, combined_text, re.IGNORECASE):
+                has_po_number = True
+                break
+        
+        for pattern in quote_request_patterns:
+            if re.search(pattern, combined_text.upper()):
+                if not has_po_number:
+                    return "QUOTE"
+                has_quote = True
+                break
+        
         if has_po and has_quote:
-            return "PO" if re.search(po_number, combined_text, re.IGNORECASE) else "QUOTE"
+            if has_po_number:
+                return "PO"
+            else:
+                return "QUOTE"
         
-        return "PO" if has_po else "QUOTE" if has_quote else "UNKNOWN"
+        if has_po:
+            return "PO"
+        elif has_quote:
+            return "QUOTE"
+        else:
+            return "UNKNOWN"
     
     def extract_products_from_text(self, text: str) -> list:
-        """Extraer productos del texto con patrones flexibles."""
         products = []
         lines = text.split('\n')
         
@@ -50,29 +103,22 @@ class ClassificationService:
             if not line or len(line) < 5:
                 continue
             
-            # Buscar todos los números en la línea
             numbers = re.findall(r'[\d,]+\.?\d*', line)
             if len(numbers) >= 2:
                 try:
-                    # Extraer nombre (texto antes de los números)
                     nombre = re.sub(r'[\d,]+\.?\d*.*$', '', line).strip()
-                    
-                    # Limpiar nombre de caracteres especiales al inicio
                     nombre = re.sub(r'^[\-\*\•\>\s]+', '', nombre).strip()
                     
                     if len(nombre) < 2:
                         continue
                     
-                    # Intentar diferentes combinaciones de números
                     nums = [float(n.replace(',', '')) for n in numbers if n.replace(',', '').replace('.', '').isdigit()]
                     
                     if len(nums) >= 3:
-                        # Formato: nombre cantidad precio_unitario total
                         cantidad = int(nums[0])
                         precio_unitario = nums[1]
                         total = nums[2]
                     elif len(nums) == 2:
-                        # Formato: nombre cantidad precio (calcular total)
                         cantidad = int(nums[0])
                         precio_unitario = nums[1]
                         total = cantidad * precio_unitario
@@ -81,7 +127,7 @@ class ClassificationService:
                     
                     if cantidad > 0 and precio_unitario > 0:
                         products.append({
-                            "nombre": nombre[:100],  # Limitar longitud
+                            "nombre": nombre[:100],
                             "cantidad": cantidad,
                             "precio_unitario": round(precio_unitario, 2),
                             "total": round(total, 2)
@@ -89,7 +135,6 @@ class ClassificationService:
                 except (ValueError, IndexError):
                     continue
             
-            # Patrón específico: "Qty: X, Price: Y" o similar
             qty_match = re.search(r'(?:Qty|Quantity|Cantidad|Cant)[\s:]*(\d+)', line, re.IGNORECASE)
             price_match = re.search(r'(?:Price|Precio|Unit|Unitario)[\s:]*\$?\s*([\d,]+\.?\d*)', line, re.IGNORECASE)
             
@@ -112,10 +157,8 @@ class ClassificationService:
         return products
     
     def extract_totals_from_text(self, text: str) -> Dict[str, Any]:
-        """Extraer totales y moneda del texto con patrones flexibles."""
         totals = {"total": 0.0, "moneda": "USD"}
         
-        # Buscar moneda primero (aparece frecuentemente antes del total)
         currency_patterns = [
             r'\b(USD|EUR|GBP|MXN|COP|ARS|CLP|PEN|BRL)\b',
             r'(?:Currency|Moneda|Divisa)[\s:]+(\w+)',
@@ -127,13 +170,11 @@ class ClassificationService:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 currency = match.group(1) if match.group(1) else match.group(0)
-                # Extraer solo las letras de moneda
                 currency_code = re.findall(r'[A-Z]{3}', currency.upper())
                 if currency_code:
                     totals["moneda"] = currency_code[0]
                     break
         
-        # Buscar total con múltiples patrones
         total_patterns = [
             r'(?:Total|Grand Total|Amount Due|Monto Total|Total Amount|Net Total|Final Total)[\s:]*\$?\s*([\d,]+\.?\d*)',
             r'(?:Total)[\s:]*(?:USD|EUR|GBP|MXN|COP)?\s*\$?\s*([\d,]+\.?\d*)',
@@ -154,13 +195,8 @@ class ClassificationService:
         
         return totals
 
-
-# Instancia global
 _classification_service_instance: Optional[ClassificationService] = None
-
-
 def get_classification_service() -> ClassificationService:
-    """Obtener o crear instancia del servicio de clasificación."""
     global _classification_service_instance
     if _classification_service_instance is None:
         _classification_service_instance = ClassificationService()

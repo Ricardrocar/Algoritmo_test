@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request
+﻿from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from app.services.gmail_service import get_gmail_service
 from app.services.extraction_service import get_extraction_service
@@ -165,4 +165,3 @@ def analyze_emails(debug: bool = False):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al analizar correo: {str(e)}")
-
