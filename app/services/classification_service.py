@@ -94,14 +94,137 @@ class ClassificationService:
         else:
             return "UNKNOWN"
     
+    def _is_metadata_line(self, line: str) -> bool:
+        line_lower = line.lower().strip()
+        
+        metadata_patterns = [
+            r'^(po\s*number|order\s*number|quote\s*number|n[uú]mero|n[oó]\.?):',
+            r'^(date|fecha|order\s*date|delivery\s*date|valid\s*until):',
+            r'^(phone|tel[eé]fono|mobile|cell):',
+            r'^(email|e-mail|correo):',
+            r'^(address|direcci[oó]n|shipping|billing):',
+            r'^(vendor|supplier|proveedor|from|de):',
+            r'^(bill\s*to|ship\s*to|to|para):',
+            r'^(payment\s*terms|t[eé]rminos|currency|moneda):',
+            r'^(authorized\s*by|signed|signature|firma):',
+            r'^(subtotal|total|grand\s*total|monto|iva|tax|shipping|env[ií]o):',
+            r'^(thank\s*you|gracias|regards|saludos|best\s*regards)',
+            r'^\+?\d{1,4}[\s\-\(\)]?\d{1,4}[\s\-]?\d{1,4}[\s\-]?\d{1,4}[\s\-]?\d{1,4}',
+            r'^[\w\.-]+@[\w\.-]+\.\w+',
+            r'^(monday|tuesday|wednesday|thursday|friday|saturday|sunday|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)',
+            r'^(january|february|march|april|may|june|july|august|september|october|november|december|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)',
+        ]
+        
+        for pattern in metadata_patterns:
+            if re.search(pattern, line_lower):
+                return True
+        
+        if len(line_lower) < 10 and re.search(r'^[a-z\s]+:\s*\d+', line_lower):
+            return True
+        
+        return False
+    
+    def _is_valid_product_name(self, nombre: str) -> bool:
+        if not nombre or len(nombre) < 3:
+            return False
+        
+        nombre_lower = nombre.lower()
+        
+        invalid_patterns = [
+            r'^(po\s*number|order\s*number|quote\s*number|n[uú]mero):',
+            r'^(date|fecha|order\s*date):',
+            r'^(phone|tel[eé]fono):',
+            r'^(email|correo):',
+            r'^(address|direcci[oó]n):',
+            r'^(vendor|supplier|from|de):',
+            r'^(bill\s*to|ship\s*to|to|para):',
+            r'^(payment|currency|moneda):',
+            r'^(authorized|signed|signature):',
+            r'^\+?\d{1,4}',
+            r'^[\w\.-]+@',
+            r'^[a-z\s]{1,15}:\s*\d+$',
+        ]
+        
+        for pattern in invalid_patterns:
+            if re.search(pattern, nombre_lower):
+                return False
+        
+        if len(nombre) < 5 and re.search(r':\s*\d+', nombre):
+            return False
+        
+        return True
+    
     def extract_products_from_text(self, text: str) -> list:
         products = []
         lines = text.split('\n')
         
+        header_found = False
+        table_started = False
+        
         for i, line in enumerate(lines):
             line = line.strip()
-            if not line or len(line) < 5:
+            if not line or len(line) < 3:
                 continue
+            
+            if self._is_metadata_line(line):
+                continue
+            
+            line_lower = line.lower()
+            
+            if re.search(r'(item|producto|description|descripci[oó]n|art[ií]culo)', line_lower) and \
+               re.search(r'(qty|quantity|cantidad|price|precio|total|unit)', line_lower):
+                header_found = True
+                table_started = True
+                continue
+            
+            if table_started and (re.search(r'^[-=]+$', line) or re.search(r'^_{3,}', line)):
+                continue
+            
+            if table_started and re.search(r'(subtotal|total|grand total|monto total|iva|tax|shipping|env[ií]o)', line_lower):
+                table_started = False
+                continue
+            
+            parts = re.split(r'\s*\|\s*|\s{2,}|\t+', line)
+            parts = [p.strip() for p in parts if p.strip()]
+            
+            if len(parts) >= 3:
+                nombre = parts[0]
+                nombre = re.sub(r'^[\-\*\•\>\d\.\s]+', '', nombre).strip()
+                
+                if not self._is_valid_product_name(nombre):
+                    continue
+                
+                numbers = []
+                for part in parts[1:]:
+                    num_match = re.search(r'[\d,]+\.?\d*', part.replace('$', '').replace(',', ''))
+                    if num_match:
+                        try:
+                            num_val = float(num_match.group(0).replace(',', ''))
+                            if num_val > 0:
+                                numbers.append(num_val)
+                        except:
+                            continue
+                
+                if len(numbers) >= 2:
+                    try:
+                        cantidad = int(numbers[0]) if numbers[0] < 10000 else int(numbers[0] / 100)
+                        precio_unitario = numbers[1] if numbers[1] < 100000 else numbers[1] / 100
+                        
+                        if len(numbers) >= 3:
+                            total = numbers[2] if numbers[2] < 1000000 else numbers[2] / 100
+                        else:
+                            total = cantidad * precio_unitario
+                        
+                        if cantidad > 0 and cantidad < 10000 and precio_unitario > 0 and precio_unitario < 100000:
+                            products.append({
+                                "nombre": nombre[:100],
+                                "cantidad": cantidad,
+                                "precio_unitario": round(precio_unitario, 2),
+                                "total": round(total, 2)
+                            })
+                            continue
+                    except:
+                        pass
             
             numbers = re.findall(r'[\d,]+\.?\d*', line)
             if len(numbers) >= 2:
@@ -109,52 +232,78 @@ class ClassificationService:
                     nombre = re.sub(r'[\d,]+\.?\d*.*$', '', line).strip()
                     nombre = re.sub(r'^[\-\*\•\>\s]+', '', nombre).strip()
                     
-                    if len(nombre) < 2:
+                    if not self._is_valid_product_name(nombre):
                         continue
                     
-                    nums = [float(n.replace(',', '')) for n in numbers if n.replace(',', '').replace('.', '').isdigit()]
+                    nums = []
+                    for n in numbers:
+                        try:
+                            num_val = float(n.replace(',', ''))
+                            if num_val > 0:
+                                nums.append(num_val)
+                        except:
+                            continue
                     
-                    if len(nums) >= 3:
-                        cantidad = int(nums[0])
-                        precio_unitario = nums[1]
-                        total = nums[2]
-                    elif len(nums) == 2:
-                        cantidad = int(nums[0])
-                        precio_unitario = nums[1]
-                        total = cantidad * precio_unitario
-                    else:
-                        continue
-                    
-                    if cantidad > 0 and precio_unitario > 0:
-                        products.append({
-                            "nombre": nombre[:100],
-                            "cantidad": cantidad,
-                            "precio_unitario": round(precio_unitario, 2),
-                            "total": round(total, 2)
-                        })
+                    if len(nums) >= 2:
+                        cantidad = int(nums[0]) if nums[0] < 10000 else int(nums[0] / 100)
+                        precio_unitario = nums[1] if nums[1] < 100000 else nums[1] / 100
+                        
+                        if len(nums) >= 3:
+                            total = nums[2] if nums[2] < 1000000 else nums[2] / 100
+                        else:
+                            total = cantidad * precio_unitario
+                        
+                        if cantidad > 0 and cantidad < 10000 and precio_unitario > 0 and precio_unitario < 100000:
+                            products.append({
+                                "nombre": nombre[:100],
+                                "cantidad": cantidad,
+                                "precio_unitario": round(precio_unitario, 2),
+                                "total": round(total, 2)
+                            })
+                            continue
                 except (ValueError, IndexError):
-                    continue
+                    pass
             
             qty_match = re.search(r'(?:Qty|Quantity|Cantidad|Cant)[\s:]*(\d+)', line, re.IGNORECASE)
-            price_match = re.search(r'(?:Price|Precio|Unit|Unitario)[\s:]*\$?\s*([\d,]+\.?\d*)', line, re.IGNORECASE)
+            price_match = re.search(r'(?:Price|Precio|Unit|Unitario|P\.U\.)[\s:]*\$?\s*([\d,]+\.?\d*)', line, re.IGNORECASE)
             
             if qty_match and price_match:
-                nombre_part = re.sub(r'(?:Qty|Quantity|Cantidad|Price|Precio|Unit).*', '', line, flags=re.IGNORECASE).strip()
-                if not nombre_part and i > 0:
-                    nombre_part = lines[i-1].strip()[:100]
+                nombre_part = re.sub(r'(?:Qty|Quantity|Cantidad|Price|Precio|Unit|Unitario|P\.U\.).*', '', line, flags=re.IGNORECASE).strip()
+                if not nombre_part or len(nombre_part) < 2:
+                    if i > 0:
+                        prev_line = lines[i-1].strip()
+                        if prev_line and len(prev_line) > 2:
+                            nombre_part = prev_line[:100]
                 
                 nombre_part = nombre_part or "Producto sin nombre"
-                cantidad = int(qty_match.group(1))
-                precio_unitario = float(price_match.group(1).replace(',', ''))
+                nombre_part = re.sub(r'^[\-\*\•\>\s]+', '', nombre_part).strip()
                 
-                products.append({
-                    "nombre": nombre_part[:100],
-                    "cantidad": cantidad,
-                    "precio_unitario": round(precio_unitario, 2),
-                    "total": round(cantidad * precio_unitario, 2)
-                })
+                if not self._is_valid_product_name(nombre_part):
+                    continue
+                
+                try:
+                    cantidad = int(qty_match.group(1))
+                    precio_unitario = float(price_match.group(1).replace(',', ''))
+                    
+                    if cantidad > 0 and cantidad < 10000 and precio_unitario > 0 and precio_unitario < 100000:
+                        products.append({
+                            "nombre": nombre_part[:100],
+                            "cantidad": cantidad,
+                            "precio_unitario": round(precio_unitario, 2),
+                            "total": round(cantidad * precio_unitario, 2)
+                        })
+                except:
+                    pass
         
-        return products
+        seen = set()
+        unique_products = []
+        for p in products:
+            key = (p["nombre"].lower(), p["cantidad"], p["precio_unitario"])
+            if key not in seen:
+                seen.add(key)
+                unique_products.append(p)
+        
+        return unique_products
     
     def extract_totals_from_text(self, text: str) -> Dict[str, Any]:
         totals = {"total": 0.0, "moneda": "USD"}

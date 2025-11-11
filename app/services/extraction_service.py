@@ -5,7 +5,7 @@ from email.utils import parsedate_to_datetime
 from app.services.gmail_service import get_gmail_service
 from app.services.pdf_service import get_pdf_service
 from app.services.classification_service import get_classification_service
-from app.utils.text_utils import clean_text, truncate_text
+from app.utils.text_utils import clean_text, truncate_text, html_to_text
 
 class ExtractionService:
     """Servicio para extraer información de correos y PDFs."""
@@ -42,9 +42,9 @@ class ExtractionService:
         }
     
     def _extract_message_body(self, payload: Dict) -> str:
-        """Extraer el texto del cuerpo del mensaje."""
         import base64
         body_text = ""
+        html_content = ""
         
         parts = payload.get('parts', [payload]) if 'parts' in payload else [payload]
         for part in parts:
@@ -53,13 +53,22 @@ class ExtractionService:
             if not data:
                 continue
             
-            decoded = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+            try:
+                decoded = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+            except:
+                continue
+            
             if mime == 'text/plain':
-                body_text += decoded
-            elif mime == 'text/html' and not body_text:
-                body_text += re.sub(r'<[^>]+>', '', decoded)
+                body_text += decoded + "\n"
+            elif mime == 'text/html':
+                html_content += decoded
         
-        return clean_text(body_text)
+        if html_content:
+            body_text = html_to_text(html_content)
+        elif body_text:
+            body_text = clean_text(body_text)
+        
+        return body_text
     
     def _extract_attachments(self, payload: Dict) -> List[Dict[str, Any]]:
         """Extraer información de adjuntos."""
@@ -131,10 +140,16 @@ class ExtractionService:
         
         tipo_documento = self.classification_service.classify_document(subject, body, pdf_combined)
         productos = []
+        
         for pdf_text in all_pdf_texts:
             productos.extend(self.classification_service.extract_products_from_text(pdf_text))
+        
         if not productos:
             productos = self.classification_service.extract_products_from_text(body)
+        else:
+            body_products = self.classification_service.extract_products_from_text(body)
+            if body_products:
+                productos.extend(body_products)
         
         totals_data = self.classification_service.extract_totals_from_text(combined_text)
         if totals_data["total"] == 0.0 and productos:
