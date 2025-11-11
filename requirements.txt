@@ -1,6 +1,10 @@
 fastapi>=0.111,<0.116
 uvicorn[standard]>=0.30,<0.33
 
+# Environment variables
+python-dotenv>=1.0.0,<2.0.0
+pydantic-settings>=2.0.0,<3.0.0
+
 # Google Gmail API
 google-auth>=2.23.0,<3.0.0
 google-auth-oauthlib>=1.1.0,<2.0.0

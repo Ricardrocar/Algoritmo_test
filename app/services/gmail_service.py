@@ -9,10 +9,8 @@ from googleapiclient.errors import HttpError
 
 from app.core.config import get_settings
 
-
 class GmailService:
     """Servicio para interactuar con la API de Gmail usando OAuth2."""
-    
     def __init__(self):
         self.settings = get_settings()
         self.creds: Optional[Credentials] = None
@@ -24,10 +22,9 @@ class GmailService:
             return False
         
         try:
-            # Cargar desde JSON (formato usado por InstalledAppFlow)
             self.creds = Credentials.from_authorized_user_file(
                 self.settings.GMAIL_TOKEN_FILE,
-                self.settings.GMAIL_SCOPES
+                self.settings.GMAIL_SCOPES_LIST
             )
             return True
         except (ValueError, json.JSONDecodeError, Exception) as e:
@@ -39,7 +36,6 @@ class GmailService:
         if not self.creds:
             return
         
-        # Guardar en formato JSON (compatible con InstalledAppFlow)
         with open(self.settings.GMAIL_TOKEN_FILE, 'w') as token:
             token.write(self.creds.to_json())
     
@@ -76,7 +72,7 @@ class GmailService:
         
         flow = Flow.from_client_secrets_file(
             self.settings.GMAIL_CREDENTIALS_FILE,
-            scopes=self.settings.GMAIL_SCOPES,
+            scopes=self.settings.GMAIL_SCOPES_LIST,
             redirect_uri=self.settings.GMAIL_REDIRECT_URI
         )
         
@@ -151,7 +147,7 @@ class GmailService:
         except HttpError as error:
             print(f"Error al obtener mensajes: {error}")
             return []
-
+    
 _gmail_service_instance: Optional[GmailService] = None
 
 def get_gmail_service() -> GmailService:
