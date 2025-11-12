@@ -19,21 +19,12 @@ class GmailService:
     def load_credentials(self) -> bool:
         token_path = self.settings.GMAIL_TOKEN_FILE
         
-        if not os.path.exists(token_path):
-            return False
-        
-        if os.path.isdir(token_path):
-            print(f"ADVERTENCIA: {token_path} es un directorio, eliminándolo...")
-            try:
-                shutil.rmtree(token_path)
-                print(f"Directorio {token_path} eliminado correctamente")
-                return False
-            except Exception as e:
-                print(f"Error al eliminar directorio {token_path}: {e}")
-                return False
-        
-        if not os.path.isfile(token_path):
-            print(f"ADVERTENCIA: {token_path} no es un archivo válido")
+        if not os.path.exists(token_path) or not os.path.isfile(token_path):
+            if os.path.isdir(token_path):
+                try:
+                    shutil.rmtree(token_path)
+                except Exception:
+                    pass
             return False
         
         try:
@@ -42,8 +33,7 @@ class GmailService:
                 self.settings.GMAIL_SCOPES_LIST
             )
             return True
-        except (ValueError, json.JSONDecodeError, Exception) as e:
-            print(f"Error al cargar credenciales: {e}")
+        except Exception:
             return False
     
     def save_credentials(self):
@@ -52,32 +42,21 @@ class GmailService:
         
         token_path = self.settings.GMAIL_TOKEN_FILE
         
-        if os.path.exists(token_path):
-            if os.path.isdir(token_path):
-                print(f"ADVERTENCIA: {token_path} es un directorio, eliminándolo...")
-                try:
+        try:
+            if os.path.exists(token_path):
+                if os.path.isdir(token_path):
                     shutil.rmtree(token_path)
-                    print(f"Directorio {token_path} eliminado correctamente")
-                except Exception as e:
-                    print(f"Error al eliminar directorio {token_path}: {e}")
-                    raise
-            elif os.path.isfile(token_path):
-                try:
+                else:
                     os.remove(token_path)
-                except Exception as e:
-                    print(f"Error al eliminar archivo {token_path}: {e}")
+        except Exception:
+            pass
         
         token_dir = os.path.dirname(token_path)
-        if token_dir and not os.path.exists(token_dir):
+        if token_dir:
             os.makedirs(token_dir, exist_ok=True)
         
-        try:
-            with open(token_path, 'w') as token:
-                token.write(self.creds.to_json())
-            print(f"Token guardado correctamente en {token_path}")
-        except Exception as e:
-            print(f"Error al escribir token en {token_path}: {e}")
-            raise
+        with open(token_path, 'w') as token:
+            token.write(self.creds.to_json())
     
     def refresh_credentials(self) -> bool:
         if self.creds and self.creds.expired and self.creds.refresh_token:
@@ -85,8 +64,7 @@ class GmailService:
                 self.creds.refresh(Request())
                 self.save_credentials()
                 return True
-            except Exception as e:
-                print(f"Error al refrescar credenciales: {e}")
+            except Exception:
                 return False
         return False
     
@@ -126,8 +104,7 @@ class GmailService:
             self.creds = flow.credentials
             self.save_credentials()
             return True
-        except Exception as e:
-            print(f"Error al intercambiar código por token: {e}")
+        except Exception:
             return False
     
     def authenticate_with_installed_app_flow(self) -> bool:
@@ -150,22 +127,19 @@ class GmailService:
         self.save_credentials()
         return True
     
-    def build_service(self):
-        if not self.is_authenticated():
-            raise ValueError("No autenticado. Por favor autentícate primero.")
-        
-        try:
+    def _ensure_service(self):
+        if not self.service:
+            if not self.is_authenticated():
+                raise ValueError("No autenticado. Por favor autentícate primero.")
             self.service = build('gmail', 'v1', credentials=self.creds)
-            return self.service
-        except Exception as e:
-            print(f"Error al construir servicio: {e}")
-            raise
+    
+    def build_service(self):
+        self._ensure_service()
+        return self.service
     
     def test_connection(self) -> dict:
         try:
-            if not self.service:
-                self.build_service()
-            
+            self._ensure_service()
             profile = self.service.users().getProfile(userId='me').execute()
             return {
                 "status": "success",
@@ -173,85 +147,28 @@ class GmailService:
                 "total_messages": profile.get('messagesTotal'),
                 "total_threads": profile.get('threadsTotal')
             }
-        except HttpError as error:
-            return {
-                "status": "error",
-                "message": f"Error de Gmail API: {error}"
-            }
         except Exception as error:
-            return {
-                "status": "error",
-                "message": f"Error inesperado: {error}"
-            }
+            return {"status": "error", "message": str(error)}
     
     def get_messages(self, max_results: int = 10, query: str = "") -> list:
         try:
-            if not self.service:
-                self.build_service()
-            
+            self._ensure_service()
             results = self.service.users().messages().list(
                 userId='me',
                 maxResults=max_results,
                 q=query
             ).execute()
-            
-            messages = results.get('messages', [])
-            return messages
-        except HttpError as error:
-            print(f"Error al obtener mensajes: {error}")
+            return results.get('messages', [])
+        except Exception:
             return []
     
-    def setup_watch(self, topic_name: str, label_ids: list = None) -> dict:
-        try:
-            if not self.service:
-                self.build_service()
-            
-            if label_ids is None:
-                label_ids = ['INBOX']
-            
-            watch_request = {
-                'labelIds': label_ids,
-                'topicName': topic_name
-            }
-            
-            result = self.service.users().watch(
-                userId='me',
-                body=watch_request
-            ).execute()
-            
-            return {
-                "status": "success",
-                "history_id": result.get('historyId'),
-                "expiration": result.get('expiration')
-            }
-        except HttpError as error:
-            return {
-                "status": "error",
-                "message": f"Error al configurar watch: {error}"
-            }
-        except Exception as error:
-            return {
-                "status": "error",
-                "message": f"Error inesperado: {error}"
-            }
-    
-    def stop_watch(self) -> dict:
-        try:
-            if not self.service:
-                self.build_service()
-            
-            self.service.users().stop(userId='me').execute()
-            return {"status": "success", "message": "Watch detenido correctamente"}
-        except HttpError as error:
-            return {
-                "status": "error",
-                "message": f"Error al detener watch: {error}"
-            }
-        except Exception as error:
-            return {
-                "status": "error",
-                "message": f"Error inesperado: {error}"
-            }
+    def get_message_json(self, message_id: str) -> dict:
+        self._ensure_service()
+        return self.service.users().messages().get(
+            userId='me',
+            id=message_id,
+            format='full'
+        ).execute()
     
 _gmail_service_instance: Optional[GmailService] = None
 

@@ -1,15 +1,15 @@
 ﻿from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from app.services.gmail_service import get_gmail_service
 from app.services.extraction_service import get_extraction_service
 from app.services.label_service import get_label_service
-
+import json
+import csv
+import io
+import zipfile
 
 router = APIRouter(prefix="/emails", tags=["emails"])
-
 _oauth_flows = {}
-
-
 @router.get("/auth/status")
 def auth_status():
     gmail_service = get_gmail_service()
@@ -108,7 +108,7 @@ def ping():
 
 
 @router.get("/analyze")
-def analyze_emails(debug: bool = False):
+def analyze_emails(debug: bool = False, download: bool = True):
     try:
         gmail_service = get_gmail_service()
         
@@ -123,7 +123,7 @@ def analyze_emails(debug: bool = False):
         
         results = gmail_service.service.users().messages().list(
             userId='me',
-            maxResults=1
+            maxResults=20
         ).execute()
         
         messages = results.get('messages', [])
@@ -133,7 +133,21 @@ def analyze_emails(debug: bool = False):
                 detail="No se encontraron correos"
             )
         
-        latest_message_id = messages[0]['id']
+        all_messages = []
+        for msg in messages:
+            msg_detail = gmail_service.service.users().messages().get(
+                userId='me',
+                id=msg['id'],
+                format='metadata',
+                metadataHeaders=['Date']
+            ).execute()
+            all_messages.append({
+                'id': msg['id'],
+                'internalDate': int(msg_detail.get('internalDate', 0))
+            })
+        
+        all_messages.sort(key=lambda x: x['internalDate'], reverse=True)
+        latest_message_id = all_messages[0]['id']
         extraction_service = get_extraction_service()
         result = extraction_service.extract_structured_data(latest_message_id, debug=debug)
         tipo_documento = result.get('tipo_documento', '').upper()
@@ -141,12 +155,64 @@ def analyze_emails(debug: bool = False):
             try:
                 label_service = get_label_service()
                 label_service.apply_label_to_message(latest_message_id, tipo_documento)
-                result['etiqueta_aplicada'] = tipo_documento
-            except Exception as e:
-                result['etiqueta_aplicada'] = None
-                result['error_etiqueta'] = str(e)
+            except Exception:
+                pass
         
-        return result
+        result.pop('etiqueta_aplicada', None)
+        result.pop('error_etiqueta', None)
+        result.pop('email_json', None)
+        
+        if not download:
+            return JSONResponse(content=result)
+        
+        json_str = json.dumps(result, indent=2, ensure_ascii=False)
+        
+        csv_output = io.StringIO()
+        csv_writer = csv.writer(csv_output)
+        
+        csv_writer.writerow(['tipo_documento', result.get('tipo_documento', '')])
+        csv_writer.writerow(['correo', result.get('correo', '')])
+        csv_writer.writerow(['asunto', result.get('asunto', '')])
+        csv_writer.writerow(['fecha', result.get('fecha', '')])
+        csv_writer.writerow(['total', result.get('totales', {}).get('total', '')])
+        csv_writer.writerow(['moneda', result.get('totales', {}).get('moneda', '')])
+        csv_writer.writerow([])
+        
+        csv_writer.writerow(['Productos'])
+        csv_writer.writerow(['nombre', 'cantidad', 'precio_unitario', 'total'])
+        for producto in result.get('productos', []):
+            csv_writer.writerow([
+                producto.get('nombre', ''),
+                producto.get('cantidad', ''),
+                producto.get('precio_unitario', ''),
+                producto.get('total', '')
+            ])
+        
+        csv_writer.writerow([])
+        csv_writer.writerow(['Adjuntos'])
+        csv_writer.writerow(['nombre', 'tipo'])
+        for adjunto in result.get('adjuntos', []):
+            csv_writer.writerow([
+                adjunto.get('nombre', ''),
+                adjunto.get('tipo', '')
+            ])
+        
+        csv_str = csv_output.getvalue()
+        
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            zip_file.writestr(f'analisis_{latest_message_id}.json', json_str.encode('utf-8'))
+            zip_file.writestr(f'analisis_{latest_message_id}.csv', csv_str.encode('utf-8'))
+        
+        zip_buffer.seek(0)
+        
+        return Response(
+            content=zip_buffer.getvalue(),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="analisis_{latest_message_id}.zip"',
+            }
+        )
             
     except HTTPException:
         raise
