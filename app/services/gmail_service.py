@@ -1,5 +1,6 @@
 import os
 import json
+import shutil
 from typing import Optional
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -10,20 +11,34 @@ from googleapiclient.errors import HttpError
 from app.core.config import get_settings
 
 class GmailService:
-    """Servicio para interactuar con la API de Gmail usando OAuth2."""
     def __init__(self):
         self.settings = get_settings()
         self.creds: Optional[Credentials] = None
         self.service = None
     
     def load_credentials(self) -> bool:
-        """Cargar credenciales desde el archivo de token si existe."""
-        if not os.path.exists(self.settings.GMAIL_TOKEN_FILE):
+        token_path = self.settings.GMAIL_TOKEN_FILE
+        
+        if not os.path.exists(token_path):
+            return False
+        
+        if os.path.isdir(token_path):
+            print(f"ADVERTENCIA: {token_path} es un directorio, eliminándolo...")
+            try:
+                shutil.rmtree(token_path)
+                print(f"Directorio {token_path} eliminado correctamente")
+                return False
+            except Exception as e:
+                print(f"Error al eliminar directorio {token_path}: {e}")
+                return False
+        
+        if not os.path.isfile(token_path):
+            print(f"ADVERTENCIA: {token_path} no es un archivo válido")
             return False
         
         try:
             self.creds = Credentials.from_authorized_user_file(
-                self.settings.GMAIL_TOKEN_FILE,
+                token_path,
                 self.settings.GMAIL_SCOPES_LIST
             )
             return True
@@ -32,15 +47,39 @@ class GmailService:
             return False
     
     def save_credentials(self):
-        """Guardar credenciales en el archivo de token."""
         if not self.creds:
             return
         
-        with open(self.settings.GMAIL_TOKEN_FILE, 'w') as token:
-            token.write(self.creds.to_json())
+        token_path = self.settings.GMAIL_TOKEN_FILE
+        
+        if os.path.exists(token_path):
+            if os.path.isdir(token_path):
+                print(f"ADVERTENCIA: {token_path} es un directorio, eliminándolo...")
+                try:
+                    shutil.rmtree(token_path)
+                    print(f"Directorio {token_path} eliminado correctamente")
+                except Exception as e:
+                    print(f"Error al eliminar directorio {token_path}: {e}")
+                    raise
+            elif os.path.isfile(token_path):
+                try:
+                    os.remove(token_path)
+                except Exception as e:
+                    print(f"Error al eliminar archivo {token_path}: {e}")
+        
+        token_dir = os.path.dirname(token_path)
+        if token_dir and not os.path.exists(token_dir):
+            os.makedirs(token_dir, exist_ok=True)
+        
+        try:
+            with open(token_path, 'w') as token:
+                token.write(self.creds.to_json())
+            print(f"Token guardado correctamente en {token_path}")
+        except Exception as e:
+            print(f"Error al escribir token en {token_path}: {e}")
+            raise
     
     def refresh_credentials(self) -> bool:
-        """Refrescar credenciales expiradas."""
         if self.creds and self.creds.expired and self.creds.refresh_token:
             try:
                 self.creds.refresh(Request())
@@ -52,7 +91,6 @@ class GmailService:
         return False
     
     def is_authenticated(self) -> bool:
-        """Verificar si el usuario está autenticado y las credenciales son válidas."""
         if not self.load_credentials():
             return False
         
@@ -63,7 +101,6 @@ class GmailService:
         return True
     
     def get_authorization_url(self) -> tuple[str, Flow]:
-        """Generar URL de autorización para el flujo OAuth2."""
         if not os.path.exists(self.settings.GMAIL_CREDENTIALS_FILE):
             raise FileNotFoundError(
                 f"Archivo de credenciales no encontrado: {self.settings.GMAIL_CREDENTIALS_FILE}. "
@@ -84,7 +121,6 @@ class GmailService:
         return auth_url, flow
     
     def authenticate_with_code(self, code: str, flow: Flow) -> bool:
-        """Intercambiar código de autorización por credenciales."""
         try:
             flow.fetch_token(code=code)
             self.creds = flow.credentials
@@ -94,8 +130,27 @@ class GmailService:
             print(f"Error al intercambiar código por token: {e}")
             return False
     
+    def authenticate_with_installed_app_flow(self) -> bool:
+        from google_auth_oauthlib.flow import InstalledAppFlow
+        
+        if not os.path.exists(self.settings.GMAIL_CREDENTIALS_FILE):
+            raise FileNotFoundError(
+                f"Archivo de credenciales no encontrado: {self.settings.GMAIL_CREDENTIALS_FILE}. "
+                "Por favor descárgalo desde Google Cloud Console."
+            )
+        
+        if self.is_authenticated():
+            return True
+        
+        flow = InstalledAppFlow.from_client_secrets_file(
+            self.settings.GMAIL_CREDENTIALS_FILE,
+            self.settings.GMAIL_SCOPES_LIST
+        )
+        self.creds = flow.run_local_server(port=0)
+        self.save_credentials()
+        return True
+    
     def build_service(self):
-        """Construir servicio de Gmail API."""
         if not self.is_authenticated():
             raise ValueError("No autenticado. Por favor autentícate primero.")
         
@@ -107,7 +162,6 @@ class GmailService:
             raise
     
     def test_connection(self) -> dict:
-        """Probar conexión con Gmail API obteniendo el perfil del usuario."""
         try:
             if not self.service:
                 self.build_service()
@@ -131,7 +185,6 @@ class GmailService:
             }
     
     def get_messages(self, max_results: int = 10, query: str = "") -> list:
-        """Obtener mensajes de Gmail."""
         try:
             if not self.service:
                 self.build_service()
@@ -149,7 +202,6 @@ class GmailService:
             return []
     
     def setup_watch(self, topic_name: str, label_ids: list = None) -> dict:
-        """Configurar watch de Gmail para recibir notificaciones de nuevos correos."""
         try:
             if not self.service:
                 self.build_service()
@@ -184,7 +236,6 @@ class GmailService:
             }
     
     def stop_watch(self) -> dict:
-        """Detener watch de Gmail."""
         try:
             if not self.service:
                 self.build_service()
@@ -205,7 +256,6 @@ class GmailService:
 _gmail_service_instance: Optional[GmailService] = None
 
 def get_gmail_service() -> GmailService:
-    """Obtener o crear instancia del servicio de Gmail."""
     global _gmail_service_instance
     if _gmail_service_instance is None:
         _gmail_service_instance = GmailService()

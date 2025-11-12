@@ -12,7 +12,6 @@ _oauth_flows = {}
 
 @router.get("/auth/status")
 def auth_status():
-    """Verificar estado de autenticación."""
     gmail_service = get_gmail_service()
     is_auth = gmail_service.is_authenticated()
     return {
@@ -22,7 +21,6 @@ def auth_status():
 
 @router.get("/auth/login")
 def login():
-    """Iniciar flujo de login OAuth2."""
     try:
         gmail_service = get_gmail_service()
         auth_url, flow = gmail_service.get_authorization_url()
@@ -39,7 +37,6 @@ def login():
 
 @router.get("/oauth2callback")
 async def oauth2_callback(request: Request):
-    """Manejar callback OAuth2 de Google."""
     try:
         code = request.query_params.get('code')
         error = request.query_params.get('error')
@@ -92,7 +89,6 @@ async def oauth2_callback(request: Request):
 
 @router.get("/ping")
 def ping():
-    """Probar conexión con Gmail API."""
     try:
         gmail_service = get_gmail_service()
         
@@ -113,7 +109,6 @@ def ping():
 
 @router.get("/analyze")
 def analyze_emails(debug: bool = False):
-    """Analizar el correo más reciente y extraer información de PDFs adjuntos."""
     try:
         gmail_service = get_gmail_service()
         
@@ -123,7 +118,6 @@ def analyze_emails(debug: bool = False):
                 detail="No autenticado. Por favor inicia sesión primero en /emails/auth/login"
             )
         
-        # Obtener el último correo recibido
         if not gmail_service.service:
             gmail_service.build_service()
         
@@ -139,14 +133,9 @@ def analyze_emails(debug: bool = False):
                 detail="No se encontraron correos"
             )
         
-        # Analizar el correo más reciente
         latest_message_id = messages[0]['id']
         extraction_service = get_extraction_service()
-        
-        # Extraer datos estructurados en formato PO/QUOTE
         result = extraction_service.extract_structured_data(latest_message_id, debug=debug)
-        
-        # Aplicar etiqueta según la clasificación
         tipo_documento = result.get('tipo_documento', '').upper()
         if tipo_documento in ['PO', 'QUOTE']:
             try:

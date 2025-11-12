@@ -8,15 +8,12 @@ from app.services.classification_service import get_classification_service
 from app.utils.text_utils import clean_text, truncate_text, html_to_text
 
 class ExtractionService:
-    """Servicio para extraer información de correos y PDFs."""
-    
     def __init__(self):
         self.gmail_service = get_gmail_service()
         self.pdf_service = get_pdf_service()
         self.classification_service = get_classification_service()
     
     def extract_email_info(self, message_id: str) -> Dict[str, Any]:
-        """Extraer información de un correo electrónico."""
         if not self.gmail_service.service:
             self.gmail_service.build_service()
         
@@ -71,7 +68,6 @@ class ExtractionService:
         return body_text
     
     def _extract_attachments(self, payload: Dict) -> List[Dict[str, Any]]:
-        """Extraer información de adjuntos."""
         return [
             {
                 "filename": part.get('filename', ''),
@@ -84,7 +80,6 @@ class ExtractionService:
         ]
     
     def download_attachment(self, message_id: str, attachment_id: str) -> bytes:
-        """Descargar un adjunto de un correo."""
         import base64
         if not self.gmail_service.service:
             self.gmail_service.build_service()
@@ -95,7 +90,6 @@ class ExtractionService:
         return base64.urlsafe_b64decode(attachment['data'])
     
     def analyze_email_with_pdfs(self, message_id: str) -> Dict[str, Any]:
-        """Analizar un correo y extraer información de PDFs adjuntos."""
         email_info = self.extract_email_info(message_id)
         pdf_results = []
         
@@ -122,7 +116,6 @@ class ExtractionService:
         }
     
     def extract_structured_data(self, message_id: str, debug: bool = False) -> Dict[str, Any]:
-        """Extraer datos estructurados del correo en formato PO/QUOTE."""
         email_info = self.extract_email_info(message_id)
         subject, body = email_info.get('subject', ''), email_info.get('body', '')
         
@@ -176,19 +169,16 @@ class ExtractionService:
         return result
     
     def _parse_date_to_iso(self, date_str: str) -> str:
-        """Convertir fecha de Gmail a formato ISO 8601."""
         try:
             return parsedate_to_datetime(date_str).isoformat() if date_str else datetime.now().isoformat()
         except:
             return datetime.now().isoformat()
     
     def _extract_email_address(self, from_field: str) -> str:
-        """Extraer dirección de email del campo 'From'."""
         match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', from_field)
         return match.group(0) if match else from_field
     
     def search_emails_with_pdfs(self, query: str = "has:attachment filename:pdf", max_results: int = 10) -> List[Dict[str, Any]]:
-        """Buscar correos con PDFs adjuntos."""
         if not self.gmail_service.service:
             self.gmail_service.build_service()
         
@@ -207,7 +197,6 @@ class ExtractionService:
 _extraction_service_instance: Optional[ExtractionService] = None
 
 def get_extraction_service() -> ExtractionService:
-    """Obtener o crear instancia del servicio de extracción."""
     global _extraction_service_instance
     if _extraction_service_instance is None:
         _extraction_service_instance = ExtractionService()

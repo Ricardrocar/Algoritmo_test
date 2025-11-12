@@ -7,11 +7,10 @@ from PyPDF2 import PdfReader
 
 
 class PDFService:
-    """Servicio para procesar y extraer texto de archivos PDF."""
     def __init__(self):
         pass
+    
     def extract_text(self, pdf_data: bytes) -> str:
-        """Extraer texto de PDF usando pdfminer."""
         try:
             pdf_file = io.BytesIO(pdf_data)
             laparams = LAParams()
@@ -21,7 +20,6 @@ class PDFService:
             raise ValueError(f"Error al extraer texto del PDF: {str(e)}")
     
     def get_pdf_metadata(self, pdf_data: bytes) -> Dict[str, Any]:
-        """Obtener metadatos del PDF."""
         try:
             pdf_file = io.BytesIO(pdf_data)
             reader = PdfReader(pdf_file)
@@ -41,7 +39,6 @@ class PDFService:
             raise ValueError(f"Error al obtener metadatos del PDF: {str(e)}")
     
     def process_pdf(self, pdf_data: bytes) -> Dict[str, Any]:
-        """Procesar PDF y extraer texto y metadatos."""
         try:
             text = self.extract_text(pdf_data)
             metadata = self.get_pdf_metadata(pdf_data)
@@ -56,7 +53,6 @@ class PDFService:
             raise ValueError(f"Error al procesar PDF: {str(e)}")
     
     def decode_base64_pdf(self, base64_data: str) -> bytes:
-        """Decodificar PDF desde base64."""
         try:
             if "," in base64_data:
                 base64_data = base64_data.split(",")[1]
@@ -68,7 +64,6 @@ class PDFService:
 _pdf_service_instance: Optional[PDFService] = None
 
 def get_pdf_service() -> PDFService:
-    """Obtener o crear instancia del servicio de PDF."""
     global _pdf_service_instance
     if _pdf_service_instance is None:
         _pdf_service_instance = PDFService()

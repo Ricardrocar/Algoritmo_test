@@ -6,12 +6,9 @@ services:
     volumes:
       - ./app:/app/app
       - ./credentials.json:/app/credentials.json:ro
-      - ./token.json:/app/token.json
+      - /token.json:/token.json
     environment:
       - PYTHONUNBUFFERED=1
-      # Configurar estas variables después de crear Pub/Sub en Google Cloud:
-      # - GMAIL_PUBSUB_PROJECT_ID=tu-project-id
-      # - GMAIL_PUBSUB_TOPIC_ID=gmail-notifications
-      # - GMAIL_PUBSUB_SUBSCRIPTION_ID=gmail-notifications-sub
+
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
